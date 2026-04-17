@@ -62,17 +62,53 @@ def build_cloud_init(cfg: dict) -> str:
     return "#cloud-config\n" + yaml.dump(cloud_config, default_flow_style=False)
 
 
+def load_cloud_config(clouds_file: str, cloud_name: str) -> dict:
+    path = Path(clouds_file).expanduser() if clouds_file else Path.home() / ".config/openstack/clouds.yaml"
+    if not path.exists():
+        print(f"ERROR: clouds.yaml not found at {path}", file=sys.stderr)
+        sys.exit(1)
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    clouds = data.get("clouds", {})
+    if cloud_name not in clouds:
+        print(f"ERROR: cloud '{cloud_name}' not found. Available: {list(clouds.keys())}", file=sys.stderr)
+        sys.exit(1)
+    return clouds[cloud_name]
+
+
 def connect(cfg: dict, clouds_file: str = None) -> openstack.connection.Connection:
     cloud_name = cfg.get("cloud", "")
     if not cloud_name:
         print("ERROR: 'cloud' key missing from config.yaml", file=sys.stderr)
         sys.exit(1)
 
-    kwargs = {"cloud": cloud_name}
-    if clouds_file:
-        os.environ["OS_CLIENT_CONFIG_FILE"] = clouds_file
+    cloud = load_cloud_config(clouds_file, cloud_name)
+    auth = cloud.get("auth", {})
+    auth_type = cloud.get("auth_type", "password")
 
-    return openstack.connect(**kwargs)
+    if auth_type == "v3applicationcredential":
+        if not auth.get("application_credential_id") or not auth.get("application_credential_secret"):
+            print("ERROR: application_credential_id and application_credential_secret required in clouds.yaml", file=sys.stderr)
+            sys.exit(1)
+        print(f"Auth mode: application credential ({auth.get('application_credential_id','')[:8]}...)")
+    else:
+        if not auth.get("password"):
+            print("ERROR: password required in clouds.yaml for password auth", file=sys.stderr)
+            sys.exit(1)
+        print(f"Auth mode: password (user: {auth.get('username', '')})")
+
+    conn_kwargs = {
+        "auth": auth,
+        "auth_type": auth_type,
+        "identity_api_version": cloud.get("identity_api_version", 3),
+        "verify": False,
+    }
+    if cloud.get("region_name"):
+        conn_kwargs["region_name"] = cloud["region_name"]
+    if cloud.get("interface"):
+        conn_kwargs["interface"] = cloud["interface"]
+
+    return openstack.connect(**conn_kwargs)
 
 
 def resolve_floating_network(conn: openstack.connection.Connection, pool: str) -> str:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test OpenStack authentication from clouds.yaml."""
+"""Test OpenStack authentication using username/password from clouds.yaml."""
 
 import argparse
 import getpass
@@ -25,36 +25,39 @@ def load_cloud_config(clouds_file: str, cloud_name: str) -> dict:
     return clouds[cloud_name]
 
 
-def test_auth(clouds_file: str, cloud_name: str):
-    cloud = load_cloud_config(clouds_file, cloud_name)
+def main():
+    parser = argparse.ArgumentParser(description="Test OpenStack password auth from clouds.yaml")
+    parser.add_argument("--clouds", default=None, help="Path to clouds.yaml")
+    parser.add_argument("--cloud", default="openstack", help="Cloud name (default: openstack)")
+    args = parser.parse_args()
+
+    cloud = load_cloud_config(args.clouds, args.cloud)
     auth = cloud.get("auth", {})
 
-    print(f"cloud name:  {cloud_name}")
+    print(f"cloud name:  {args.cloud}")
     print(f"auth_url:    {auth.get('auth_url', '')}")
     print(f"username:    {auth.get('username', '')}")
     print(f"project:     {auth.get('project_name', auth.get('project_id', ''))}")
     print(f"user_domain: {auth.get('user_domain_name', '')}")
     print()
 
-    password = getpass.getpass("Password: ")
-    auth["password"] = password
+    auth["password"] = getpass.getpass("Password: ")
 
-    # Remove project_id if project_name is present to avoid conflicts
     if auth.get("project_name") and auth.get("project_id"):
         del auth["project_id"]
 
     conn_kwargs = {
         "auth": auth,
-        "auth_type": cloud.get("auth_type", "password"),
+        "auth_type": "password",
         "identity_api_version": cloud.get("identity_api_version", 3),
-        "verify": False,  # disable SSL verification for self-signed certs
+        "verify": False,
     }
     if cloud.get("region_name"):
         conn_kwargs["region_name"] = cloud["region_name"]
     if cloud.get("interface"):
         conn_kwargs["interface"] = cloud["interface"]
 
-    print("\nAuthenticating (SSL verify: off) ...")
+    print("\nAuthenticating ...")
     try:
         conn = openstack.connect(**conn_kwargs)
         token = conn.auth_token
@@ -68,14 +71,6 @@ def test_auth(clouds_file: str, cloud_name: str):
         print(f"\nAuthentication failed: {e}", file=sys.stderr)
         traceback.print_exc()
         sys.exit(1)
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Test OpenStack auth from clouds.yaml")
-    parser.add_argument("--clouds", default=None, help="Path to clouds.yaml")
-    parser.add_argument("--cloud", default="openstack", help="Cloud name (default: openstack)")
-    args = parser.parse_args()
-    test_auth(clouds_file=args.clouds, cloud_name=args.cloud)
 
 
 if __name__ == "__main__":
