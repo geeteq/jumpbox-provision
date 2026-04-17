@@ -4,10 +4,21 @@
 import sys
 import os
 import argparse
+import getpass
 from pathlib import Path
 
 import openstack
 import yaml
+
+
+def get_username_from_clouds(clouds_file: str, cloud_name: str) -> str:
+    path = clouds_file or os.path.expanduser("~/.config/openstack/clouds.yaml")
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return data["clouds"][cloud_name]["auth"].get("username", "")
+    except Exception:
+        return ""
 
 
 def test_auth(clouds_file: str, cloud_name: str):
@@ -16,6 +27,13 @@ def test_auth(clouds_file: str, cloud_name: str):
 
     print(f"clouds.yaml: {clouds_file or '~/.config/openstack/clouds.yaml'}")
     print(f"cloud name:  {cloud_name}")
+
+    username = get_username_from_clouds(clouds_file, cloud_name)
+    if username:
+        print(f"username:    {username}")
+
+    password = getpass.getpass("Password: ")
+    os.environ["OS_PASSWORD"] = password
     print()
 
     try:
