@@ -23,6 +23,7 @@ generate_api_key:
 provision_vm:
   stage: provision
   image: python:3.11-slim
+  timeout: 10 minutes
   before_script:
     - pip install --quiet openstacksdk pyyaml
   script:
@@ -44,3 +45,25 @@ provision_vm:
       when: manual    # require explicit trigger to avoid accidental VM creation
   environment:
     name: jumpbox
+
+dry_run_vm:
+  stage: provision
+  image: python:3.11-slim
+  timeout: 5 minutes
+  before_script:
+    - pip install --quiet openstacksdk pyyaml
+  script:
+    - python provision_vm.py --config "${CONFIG_FILE}" --dry-run
+  variables:
+    OS_AUTH_URL: "${OS_AUTH_URL}"
+    OS_APPLICATION_CREDENTIAL_ID: "${OS_APPLICATION_CREDENTIAL_ID}"
+    OS_APPLICATION_CREDENTIAL_SECRET: "${OS_APPLICATION_CREDENTIAL_SECRET}"
+    OS_USERNAME: "${OS_USERNAME}"
+    OS_PASSWORD: "${OS_PASSWORD}"
+    OS_PROJECT_NAME: "${OS_PROJECT_NAME}"
+    OS_PROJECT_DOMAIN_NAME: "${OS_PROJECT_DOMAIN_NAME}"
+    OS_USER_DOMAIN_NAME: "${OS_USER_DOMAIN_NAME}"
+    OS_REGION_NAME: "${OS_REGION_NAME}"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: always    # runs automatically on every push to validate config

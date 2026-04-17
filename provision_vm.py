@@ -4,6 +4,7 @@
 import argparse
 import os
 import re
+import socket
 import sys
 import time
 from pathlib import Path
@@ -12,6 +13,8 @@ import openstack
 import yaml
 
 SCRIPT_DIR = Path(__file__).parent
+SSH_WAIT_TIMEOUT = 120
+SSH_POLL_INTERVAL = 5
 
 
 def load_config(path: str = "config.yaml") -> dict:
@@ -19,7 +22,6 @@ def load_config(path: str = "config.yaml") -> dict:
     with open(config_path) as f:
         raw = f.read()
 
-    # Expand ${VAR} and ${VAR:-default} placeholders from environment
     def replace_env(match):
         key, _, default = match.group(1).partition(":-")
         return os.environ.get(key, default)
@@ -69,7 +71,7 @@ def build_cloud_init(cfg: dict) -> str:
         "package_upgrade": False,
         "packages": packages,
         "runcmd": [
-            f"echo 'Jumpbox provisioned by jumpbox-provision' > /etc/motd",
+            "echo 'Jumpbox provisioned by jumpbox-provision' > /etc/motd",
         ],
     }
 
@@ -79,7 +81,6 @@ def build_cloud_init(cfg: dict) -> str:
 def connect(cfg: dict) -> openstack.connection.Connection:
     os_cfg = cfg.get("openstack", {})
 
-    # Prefer application credentials if set
     app_cred_id = os.environ.get("OS_APPLICATION_CREDENTIAL_ID")
     app_cred_secret = os.environ.get("OS_APPLICATION_CREDENTIAL_SECRET")
 
@@ -108,34 +109,87 @@ def connect(cfg: dict) -> openstack.connection.Connection:
     )
 
 
-def provision(cfg: dict, conn: openstack.connection.Connection) -> None:
+def resolve_floating_network(conn: openstack.connection.Connection, pool: str) -> str:
+    """Return the network ID for the given floating IP pool name or UUID."""
+    network = conn.network.find_network(pool, ignore_missing=True)
+    if not network:
+        print(f"ERROR: floating_ip_pool '{pool}' not found", file=sys.stderr)
+        sys.exit(1)
+    return network.id
+
+
+def get_server_ip(server) -> str:
+    """Extract the first available IP address from server addresses."""
+    for net_addresses in server.addresses.values():
+        for addr in net_addresses:
+            return addr["addr"]
+    return ""
+
+
+def wait_for_ssh(host: str, timeout: int = SSH_WAIT_TIMEOUT, interval: int = SSH_POLL_INTERVAL):
+    """Poll TCP port 22 until it accepts connections or timeout is reached."""
+    print(f"Waiting for SSH on {host}:22 (up to {timeout}s) ...")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, 22), timeout=5):
+                print(f"SSH is ready on {host}.")
+                return
+        except OSError:
+            time.sleep(interval)
+    print(f"WARNING: SSH on {host}:22 not reachable after {timeout}s — cloud-init may still be running.", file=sys.stderr)
+
+
+def provision(cfg: dict, conn: openstack.connection.Connection, dry_run: bool = False) -> None:
     vm_cfg = cfg.get("vm", {})
     vm_name = vm_cfg["name"]
 
+    # Idempotency check
     existing = conn.compute.find_server(vm_name)
     if existing:
         print(f"VM '{vm_name}' already exists (id: {existing.id}, status: {existing.status}) — skipping.")
         return
 
-    # Resolve image
+    # Resolve resources
     image = conn.compute.find_image(vm_cfg["image"])
     if not image:
         print(f"ERROR: image '{vm_cfg['image']}' not found", file=sys.stderr)
         sys.exit(1)
 
-    # Resolve flavor
     flavor = conn.compute.find_flavor(vm_cfg["flavor"])
     if not flavor:
         print(f"ERROR: flavor '{vm_cfg['flavor']}' not found", file=sys.stderr)
         sys.exit(1)
 
-    # Resolve network
     network = conn.network.find_network(vm_cfg["network"])
     if not network:
         print(f"ERROR: network '{vm_cfg['network']}' not found", file=sys.stderr)
         sys.exit(1)
 
     user_data = build_cloud_init(cfg)
+
+    metadata = {
+        "provisioned_by": "jumpbox-provision",
+        "managed": "true",
+    }
+    if os.environ.get("CI_PIPELINE_ID"):
+        metadata["gitlab_pipeline_id"] = os.environ["CI_PIPELINE_ID"]
+    if os.environ.get("CI_PROJECT_NAME"):
+        metadata["gitlab_project"] = os.environ["CI_PROJECT_NAME"]
+
+    print(f"VM name:    {vm_name}")
+    print(f"Image:      {image.name} ({image.id})")
+    print(f"Flavor:     {flavor.name} ({flavor.id})")
+    print(f"Network:    {network.name} ({network.id})")
+    print(f"Sec groups: {vm_cfg.get('security_groups', ['default'])}")
+    print(f"Metadata:   {metadata}")
+    print("--- cloud-init ---")
+    print(user_data)
+    print("------------------")
+
+    if dry_run:
+        print("Dry run complete — no VM was created.")
+        return
 
     server_kwargs = {
         "name": vm_name,
@@ -144,16 +198,13 @@ def provision(cfg: dict, conn: openstack.connection.Connection) -> None:
         "networks": [{"uuid": network.id}],
         "security_groups": [{"name": sg} for sg in vm_cfg.get("security_groups", ["default"])],
         "user_data": user_data,
+        "metadata": metadata,
     }
 
     if vm_cfg.get("availability_zone"):
         server_kwargs["availability_zone"] = vm_cfg["availability_zone"]
 
     print(f"Creating VM '{vm_name}' ...")
-    print(f"  Image:   {image.name} ({image.id})")
-    print(f"  Flavor:  {flavor.name} ({flavor.id})")
-    print(f"  Network: {network.name} ({network.id})")
-
     server = conn.compute.create_server(**server_kwargs)
 
     print("Waiting for VM to become ACTIVE ...")
@@ -164,12 +215,19 @@ def provision(cfg: dict, conn: openstack.connection.Connection) -> None:
     fip_pool = vm_cfg.get("floating_ip_pool", "")
     if fip_pool:
         print(f"Allocating floating IP from pool '{fip_pool}' ...")
-        fip = conn.network.create_ip(floating_network_id=fip_pool)
+        net_id = resolve_floating_network(conn, fip_pool)
+        fip = conn.network.create_ip(floating_network_id=net_id)
         conn.compute.add_floating_ip_to_server(server, fip.floating_ip_address)
-        print(f"Floating IP assigned: {fip.floating_ip_address}")
+        ssh_host = fip.floating_ip_address
+        print(f"Floating IP: {ssh_host}")
     else:
-        addresses = server.addresses
-        print(f"Addresses: {addresses}")
+        ssh_host = get_server_ip(server)
+        print(f"IP address:  {ssh_host}")
+
+    if ssh_host:
+        wait_for_ssh(ssh_host)
+        ssh_user = cfg.get("ssh", {}).get("baremetal_user", "baremetal")
+        print(f"\nConnect with: ssh {ssh_user}@{ssh_host}")
 
     print("Provisioning complete.")
 
@@ -178,12 +236,13 @@ def main():
     parser = argparse.ArgumentParser(description="Provision a RHEL9 jumpbox on OpenStack")
     parser.add_argument("--config", default="config.yaml", help="Path to config file")
     parser.add_argument("--env", default=".env", help="Path to .env file")
+    parser.add_argument("--dry-run", action="store_true", help="Validate config and print plan without creating VM")
     args = parser.parse_args()
 
     load_env(args.env)
     cfg = load_config(args.config)
     conn = connect(cfg)
-    provision(cfg, conn)
+    provision(cfg, conn, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
