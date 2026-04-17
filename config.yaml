@@ -4,8 +4,6 @@ openstack:
   password: "${OS_PASSWORD}"
   project_name: "${OS_PROJECT_NAME}"
   project_domain_name: "${OS_PROJECT_DOMAIN_NAME:-Default}"
-  user_domain_name: "${OS_USER_DOMAIN_NAME:-Default}"
-  region_name: "${OS_REGION_NAME:-RegionOne}"
 
 api_credential:
   name: "jumpbox-provision-cred"
@@ -18,9 +16,8 @@ vm:
   flavor: "m1.medium"      # flavor name or UUID
   network: "your-network"  # network name or UUID
   security_groups:
-    - "default"
-    - "ssh-access"
-  availability_zone: "nova"
+    - "internal"
+  availability_zone: "vmware"
   floating_ip_pool: ""     # leave empty to skip floating IP assignment
 
 ssh:

@@ -98,14 +98,12 @@ def connect(cfg: dict) -> openstack.connection.Connection:
             "password": os_cfg["password"],
             "project_name": os_cfg["project_name"],
             "project_domain_name": os_cfg.get("project_domain_name", "Default"),
-            "user_domain_name": os_cfg.get("user_domain_name", "Default"),
         }
         auth_type = "password"
 
     return openstack.connect(
         auth=auth,
         auth_type=auth_type,
-        region_name=os_cfg.get("region_name", "RegionOne"),
     )
 
 
