@@ -4,6 +4,7 @@
 import argparse
 import getpass
 import sys
+import traceback
 from pathlib import Path
 
 import openstack
@@ -38,17 +39,22 @@ def test_auth(clouds_file: str, cloud_name: str):
     password = getpass.getpass("Password: ")
     auth["password"] = password
 
+    # Remove project_id if project_name is present to avoid conflicts
+    if auth.get("project_name") and auth.get("project_id"):
+        del auth["project_id"]
+
     conn_kwargs = {
         "auth": auth,
         "auth_type": cloud.get("auth_type", "password"),
         "identity_api_version": cloud.get("identity_api_version", 3),
+        "verify": False,  # disable SSL verification for self-signed certs
     }
     if cloud.get("region_name"):
         conn_kwargs["region_name"] = cloud["region_name"]
     if cloud.get("interface"):
         conn_kwargs["interface"] = cloud["interface"]
 
-    print("\nAuthenticating ...")
+    print("\nAuthenticating (SSL verify: off) ...")
     try:
         conn = openstack.connect(**conn_kwargs)
         token = conn.auth_token
@@ -60,6 +66,7 @@ def test_auth(clouds_file: str, cloud_name: str):
         print(f"Project: {project.name}")
     except Exception as e:
         print(f"\nAuthentication failed: {e}", file=sys.stderr)
+        traceback.print_exc()
         sys.exit(1)
 
 
