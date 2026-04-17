@@ -44,12 +44,15 @@ def load_env(env_file: str = ".env"):
 def build_cloud_init(cfg: dict) -> str:
     ssh_cfg = cfg.get("ssh", {})
     user = ssh_cfg.get("baremetal_user", "baremetal")
-    pub_key = ssh_cfg.get("public_key", "")
-    pub_key_file = ssh_cfg.get("public_key_file", "")
+    pub_key = os.environ.get("SSH_PUBLIC_KEY", "").strip()
 
-    if pub_key_file and not pub_key:
-        key_path = Path(pub_key_file).expanduser()
-        pub_key = key_path.read_text().strip()
+    if not pub_key:
+        pub_key = ssh_cfg.get("public_key", "").strip()
+
+    if not pub_key:
+        pub_key_file = ssh_cfg.get("public_key_file", "")
+        if pub_key_file:
+            pub_key = Path(pub_key_file).expanduser().read_text().strip()
 
     if not pub_key:
         print("WARNING: no SSH public key configured — VM will be inaccessible via SSH", file=sys.stderr)

@@ -38,6 +38,7 @@ provision_vm:
     OS_PASSWORD: "${OS_PASSWORD}"
     OS_PROJECT_NAME: "${OS_PROJECT_NAME}"
     OS_PROJECT_DOMAIN_NAME: "${OS_PROJECT_DOMAIN_NAME}"
+    SSH_PUBLIC_KEY: "${SSH_PUBLIC_KEY}"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual    # require explicit trigger to avoid accidental VM creation
@@ -60,6 +61,7 @@ dry_run_vm:
     OS_PASSWORD: "${OS_PASSWORD}"
     OS_PROJECT_NAME: "${OS_PROJECT_NAME}"
     OS_PROJECT_DOMAIN_NAME: "${OS_PROJECT_DOMAIN_NAME}"
+    SSH_PUBLIC_KEY: "${SSH_PUBLIC_KEY}"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: always    # runs automatically on every push to validate config
