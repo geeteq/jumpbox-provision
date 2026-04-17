@@ -1,0 +1,46 @@
+stages:
+  - generate-credentials
+  - provision
+
+variables:
+  CONFIG_FILE: config.yaml
+
+# Optional: generate an application credential before provisioning.
+# Set OS_USERNAME / OS_PASSWORD in GitLab CI/CD > Variables (masked).
+generate_api_key:
+  stage: generate-credentials
+  image: python:3.11-slim
+  before_script:
+    - pip install --quiet python-openstackclient
+  script:
+    - bash generate_api_key.sh jumpbox-provision-cred
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'       # manual trigger only
+      when: manual
+  artifacts:
+    reports: {}   # credential values printed to log; copy to CI vars manually
+
+provision_vm:
+  stage: provision
+  image: python:3.11-slim
+  before_script:
+    - pip install --quiet openstacksdk pyyaml
+  script:
+    - python provision_vm.py --config "${CONFIG_FILE}"
+  variables:
+    OS_AUTH_URL: "${OS_AUTH_URL}"
+    # Use application credentials (preferred in CI):
+    OS_APPLICATION_CREDENTIAL_ID: "${OS_APPLICATION_CREDENTIAL_ID}"
+    OS_APPLICATION_CREDENTIAL_SECRET: "${OS_APPLICATION_CREDENTIAL_SECRET}"
+    # Or username/password (fallback):
+    OS_USERNAME: "${OS_USERNAME}"
+    OS_PASSWORD: "${OS_PASSWORD}"
+    OS_PROJECT_NAME: "${OS_PROJECT_NAME}"
+    OS_PROJECT_DOMAIN_NAME: "${OS_PROJECT_DOMAIN_NAME}"
+    OS_USER_DOMAIN_NAME: "${OS_USER_DOMAIN_NAME}"
+    OS_REGION_NAME: "${OS_REGION_NAME}"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual    # require explicit trigger to avoid accidental VM creation
+  environment:
+    name: jumpbox

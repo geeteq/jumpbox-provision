@@ -1,0 +1,33 @@
+openstack:
+  auth_url: "${OS_AUTH_URL}"
+  username: "${OS_USERNAME}"
+  password: "${OS_PASSWORD}"
+  project_name: "${OS_PROJECT_NAME}"
+  project_domain_name: "${OS_PROJECT_DOMAIN_NAME:-Default}"
+  user_domain_name: "${OS_USER_DOMAIN_NAME:-Default}"
+  region_name: "${OS_REGION_NAME:-RegionOne}"
+
+api_credential:
+  name: "jumpbox-provision-cred"
+  description: "Application credential for jumpbox VM provisioning"
+  unrestricted: false
+
+vm:
+  name: "jumpbox"
+  image: "rhel9"           # image name or UUID
+  flavor: "m1.medium"      # flavor name or UUID
+  network: "your-network"  # network name or UUID
+  security_groups:
+    - "default"
+    - "ssh-access"
+  availability_zone: "nova"
+  floating_ip_pool: ""     # leave empty to skip floating IP assignment
+
+ssh:
+  baremetal_user: "baremetal"
+  public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB... user@host"
+  # or specify a path to a public key file:
+  # public_key_file: "~/.ssh/id_rsa.pub"
+
+packages:
+  - mtr
