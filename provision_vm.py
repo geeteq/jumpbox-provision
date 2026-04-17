@@ -112,6 +112,11 @@ def provision(cfg: dict, conn: openstack.connection.Connection) -> None:
     vm_cfg = cfg.get("vm", {})
     vm_name = vm_cfg["name"]
 
+    existing = conn.compute.find_server(vm_name)
+    if existing:
+        print(f"VM '{vm_name}' already exists (id: {existing.id}, status: {existing.status}) — skipping.")
+        return
+
     # Resolve image
     image = conn.compute.find_image(vm_cfg["image"])
     if not image:
