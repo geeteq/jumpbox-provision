@@ -1,4 +1,5 @@
 .env
+clouds.yaml
 *.pyc
 __pycache__/
 .venv/

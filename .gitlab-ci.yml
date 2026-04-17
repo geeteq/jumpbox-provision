@@ -5,43 +5,43 @@ stages:
 variables:
   CONFIG_FILE: config.yaml
 
-# Optional: generate an application credential before provisioning.
-# Set OS_USERNAME / OS_PASSWORD in GitLab CI/CD > Variables (masked).
+# Store your clouds.yaml content in GitLab CI/CD > Variables as CLOUDS_YAML (type: File).
+# The pipeline writes it to the standard location before running any OpenStack commands.
+
+.setup_clouds: &setup_clouds
+  before_script:
+    - mkdir -p ~/.config/openstack
+    - echo "${CLOUDS_YAML}" > ~/.config/openstack/clouds.yaml
+
 generate_api_key:
   stage: generate-credentials
   image: python:3.11-slim
   before_script:
     - pip install --quiet python-openstackclient
+    - mkdir -p ~/.config/openstack
+    - echo "${CLOUDS_YAML}" > ~/.config/openstack/clouds.yaml
   script:
-    - bash generate_api_key.sh jumpbox-provision-cred
+    - bash generate_api_key.sh ~/.config/openstack/clouds.yaml "${CLOUD_NAME}" jumpbox-provision-cred
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "web"'       # manual trigger only
+    - if: '$CI_PIPELINE_SOURCE == "web"'
       when: manual
-  artifacts:
-    reports: {}   # credential values printed to log; copy to CI vars manually
 
 provision_vm:
   stage: provision
   image: python:3.11-slim
   timeout: 10 minutes
+  <<: *setup_clouds
   before_script:
     - pip install --quiet openstacksdk pyyaml
+    - mkdir -p ~/.config/openstack
+    - echo "${CLOUDS_YAML}" > ~/.config/openstack/clouds.yaml
   script:
     - python provision_vm.py --config "${CONFIG_FILE}"
   variables:
-    OS_AUTH_URL: "${OS_AUTH_URL}"
-    # Use application credentials (preferred in CI):
-    OS_APPLICATION_CREDENTIAL_ID: "${OS_APPLICATION_CREDENTIAL_ID}"
-    OS_APPLICATION_CREDENTIAL_SECRET: "${OS_APPLICATION_CREDENTIAL_SECRET}"
-    # Or username/password (fallback):
-    OS_USERNAME: "${OS_USERNAME}"
-    OS_PASSWORD: "${OS_PASSWORD}"
-    OS_PROJECT_NAME: "${OS_PROJECT_NAME}"
-    OS_PROJECT_DOMAIN_NAME: "${OS_PROJECT_DOMAIN_NAME}"
     SSH_PUBLIC_KEY: "${SSH_PUBLIC_KEY}"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual    # require explicit trigger to avoid accidental VM creation
+      when: manual
   environment:
     name: jumpbox
 
@@ -51,17 +51,12 @@ dry_run_vm:
   timeout: 5 minutes
   before_script:
     - pip install --quiet openstacksdk pyyaml
+    - mkdir -p ~/.config/openstack
+    - echo "${CLOUDS_YAML}" > ~/.config/openstack/clouds.yaml
   script:
     - python provision_vm.py --config "${CONFIG_FILE}" --dry-run
   variables:
-    OS_AUTH_URL: "${OS_AUTH_URL}"
-    OS_APPLICATION_CREDENTIAL_ID: "${OS_APPLICATION_CREDENTIAL_ID}"
-    OS_APPLICATION_CREDENTIAL_SECRET: "${OS_APPLICATION_CREDENTIAL_SECRET}"
-    OS_USERNAME: "${OS_USERNAME}"
-    OS_PASSWORD: "${OS_PASSWORD}"
-    OS_PROJECT_NAME: "${OS_PROJECT_NAME}"
-    OS_PROJECT_DOMAIN_NAME: "${OS_PROJECT_DOMAIN_NAME}"
     SSH_PUBLIC_KEY: "${SSH_PUBLIC_KEY}"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      when: always    # runs automatically on every push to validate config
+      when: always
