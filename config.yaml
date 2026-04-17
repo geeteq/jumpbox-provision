@@ -1,4 +1,4 @@
-cloud: mycloud   # name of the cloud entry in clouds.yaml
+cloud: openstack   # name of the cloud entry in clouds.yaml
 
 vm:
   name: "jumpbox"
